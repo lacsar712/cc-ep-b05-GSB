@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -12,6 +13,37 @@ from app.models import EventStore, RunProjection
 
 
 TERMINAL_STATUSES = {"completed", "aborted"}
+
+
+class ArtifactType(str, Enum):
+    """挂载产物的合法类型（枚举约束，服务端权威）。"""
+
+    MODEL = "model"
+    DATASET = "dataset"
+    LOG = "log"
+    GRAPH = "graph"
+
+
+ARTIFACT_TYPE_LABELS = {
+    ArtifactType.MODEL.value: "模型",
+    ArtifactType.DATASET.value: "数据集",
+    ArtifactType.LOG.value: "日志",
+    ArtifactType.GRAPH.value: "图",
+}
+
+
+def coerce_artifact_type(value: Any) -> str:
+    """校验产物类型，非法值抛 DomainError 并给出原因，返回归一化的枚举值。"""
+    try:
+        return ArtifactType(value).value
+    except (ValueError, TypeError):
+        allowed = "、".join(
+            f"{t.value}（{ARTIFACT_TYPE_LABELS[t.value]}）" for t in ArtifactType
+        )
+        raise DomainError(
+            f"产物类型非法：{value!r} 不在允许范围内，仅支持 {allowed}",
+            status_code=422,
+        )
 
 
 class DomainError(Exception):
@@ -98,9 +130,11 @@ def _apply_event_to_projection(proj: RunProjection | None, event: EventStore) ->
         proj.metrics_json = metrics
     elif event.event_type == "ArtifactAttached":
         artifacts = list(proj.artifacts_json or [])
+        # 历史事件可能缺 type，回放时默认归为模型，保证旧投影可重建
         artifacts.append(
             {
                 "name": payload["name"],
+                "type": coerce_artifact_type(payload.get("type", ArtifactType.MODEL.value)),
                 "uri": payload["uri"],
                 "content_sha256": payload["content_sha256"].lower(),
                 "media_type": payload.get("media_type"),
@@ -220,6 +254,7 @@ def attach_artifact(
     run_id: UUID,
     actor: str,
     name: str,
+    artifact_type: Any,
     uri: str,
     content_sha256: str,
     media_type: str | None,
@@ -228,6 +263,8 @@ def attach_artifact(
     proj = _get_projection(db, run_id)
     _require_running(proj)
     _check_expected_version(proj, expected_version)
+    # 领域层二次校验：即使绕过 Pydantic 也拒绝非法类型
+    artifact_type = coerce_artifact_type(artifact_type)
 
     event = _append_event(
         db,
@@ -236,6 +273,7 @@ def attach_artifact(
         event_type="ArtifactAttached",
         payload={
             "name": name,
+            "type": artifact_type,
             "uri": uri,
             "content_sha256": content_sha256.lower(),
             "media_type": media_type,

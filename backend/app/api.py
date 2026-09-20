@@ -137,6 +137,7 @@ def post_artifact(
             run_id=run_id,
             actor=user["username"],
             name=body.name,
+            artifact_type=body.artifact_type,
             uri=body.uri,
             content_sha256=body.content_sha256,
             media_type=body.media_type,

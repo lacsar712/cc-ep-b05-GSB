@@ -57,8 +57,7 @@
           :data="run.artifacts_json || []"
           :bordered="false"
         />
-      </div>
-    </div>
+      </div>    </div>
 
     <div v-if="canWrite" class="card">
       <h3 style="margin-top: 0">命令操作区（乐观锁 expected_version = {{ run.version }}）</h3>
@@ -73,6 +72,12 @@
         <div>
           <h4>AttachArtifact</h4>
           <n-input v-model:value="artifact.name" placeholder="产物名" style="margin-bottom: 8px" />
+          <n-select
+            v-model:value="artifact.artifact_type"
+            :options="artifactTypeOptions"
+            placeholder="选择产物类型"
+            style="margin-bottom: 8px"
+          />
           <n-input v-model:value="artifact.uri" placeholder="URI" style="margin-bottom: 8px" />
           <n-input v-model:value="artifact.content_sha256" placeholder="content sha256" class="mono" style="margin-bottom: 8px" />
           <n-button text type="primary" @click="artifact.content_sha256 = randomHex(32)">随机指纹</n-button>
@@ -97,9 +102,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { useMessage } from 'naive-ui'
+import { NTag, useMessage } from 'naive-ui'
 import {
   abortRun,
   attachArtifact,
@@ -108,6 +113,13 @@ import {
   recordMetric,
 } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import {
+  ARTIFACT_TYPES,
+  ARTIFACT_TYPE_LABELS,
+  validateArtifactType,
+} from '../constants'
+
+const artifactTypeOptions = ARTIFACT_TYPES
 
 const route = useRoute()
 const auth = useAuthStore()
@@ -120,6 +132,7 @@ const abortReason = ref('')
 const metric = reactive({ name: 'loss', value: 0.5, step: 1 })
 const artifact = reactive({
   name: 'checkpoint.pt',
+  artifact_type: null,
   uri: 's3://lab-artifacts/checkpoint.pt',
   content_sha256: '',
   media_type: 'application/octet-stream',
@@ -140,8 +153,28 @@ const metricCols = [
   { title: 'value', key: 'value' },
   { title: 'step', key: 'step' },
 ]
+const artifactTypeTagType = {
+  model: 'success',
+  dataset: 'info',
+  log: 'warning',
+  graph: 'default',
+}
 const artifactCols = [
   { title: 'name', key: 'name' },
+  {
+    title: '类型',
+    key: 'type',
+    width: 90,
+    render(row) {
+      const value = row.type || 'model'
+      const label = ARTIFACT_TYPE_LABELS[value] || value
+      return h(
+        NTag,
+        { size: 'small', type: artifactTypeTagType[value] || 'default' },
+        { default: () => label },
+      )
+    },
+  },
   { title: 'uri', key: 'uri', ellipsis: { tooltip: true } },
 ]
 
@@ -185,6 +218,15 @@ function doMetric() {
 }
 
 function doArtifact() {
+  if (!artifact.name?.trim()) {
+    message.warning('请填写产物名')
+    return
+  }
+  const typeError = validateArtifactType(artifact.artifact_type)
+  if (typeError) {
+    message.error(typeError)
+    return
+  }
   if (!artifact.content_sha256 || artifact.content_sha256.length !== 64) {
     message.warning('请填写 64 位 content_sha256')
     return
@@ -192,6 +234,7 @@ function doArtifact() {
   return withBusy(() =>
     attachArtifact(run.value.id, {
       ...artifact,
+      artifact_type: artifact.artifact_type,
       expected_version: run.value.version,
     }),
   )

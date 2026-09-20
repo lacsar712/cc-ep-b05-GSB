@@ -43,6 +43,9 @@
         <ul v-if="lineage.artifacts?.length">
           <li v-for="(a, i) in lineage.artifacts" :key="i">
             <strong>{{ a.name }}</strong>
+            <n-tag size="tiny" :type="artifactTagType(a.type)" style="margin-left: 6px">
+              {{ artifactTypeLabel(a.type) }}
+            </n-tag>
             <div class="mono muted" style="font-size: 12px">{{ a.content_sha256 }}</div>
             <div class="muted" style="font-size: 12px">{{ a.uri }}</div>
           </li>
@@ -86,12 +89,27 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { getLineage } from '../api/client'
+import { ARTIFACT_TYPE_LABELS } from '../constants'
 
 const route = useRoute()
 const message = useMessage()
 const lineage = ref(null)
 const id = computed(() => route.params.id)
 const colors = ['#0f766e', '#b45309', '#1d4ed8', '#be123c']
+
+const artifactTagTypeMap = {
+  model: 'success',
+  dataset: 'info',
+  log: 'warning',
+  graph: 'default',
+}
+function artifactTypeLabel(v) {
+  // 历史投影缺 type 时默认按模型展示
+  return ARTIFACT_TYPE_LABELS[v || 'model'] || v || '—'
+}
+function artifactTagType(v) {
+  return artifactTagTypeMap[v || 'model'] || 'default'
+}
 
 function formatTime(v) {
   return new Date(v).toLocaleString()

@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.cqrs import (
+    ARTIFACT_TYPE_LABELS,
     ConflictError,
     DomainError,
     abort_run,
@@ -174,6 +175,7 @@ def test_projection_matches_event_replay(db):
         run_id=run.id,
         actor="researcher",
         name="model.bin",
+        artifact_type="log",
         uri="file:///tmp/model.bin",
         content_sha256=sha("model"),
         media_type="application/octet-stream",
@@ -204,6 +206,93 @@ def test_projection_matches_event_replay(db):
     assert rebuilt.code_commit_sha == stored.code_commit_sha
     assert len(rebuilt.metrics_json) == len(stored.metrics_json)
     assert len(rebuilt.artifacts_json) == len(stored.artifacts_json)
+    assert rebuilt.artifacts_json[0]["type"] == "log"
+    assert stored.artifacts_json[0]["type"] == "log"
+
+
+def test_illegal_artifact_type_rejected_at_domain(db):
+    run = start_run(
+        db,
+        actor="researcher",
+        project="p1",
+        name="n1",
+        dataset_content_sha256=sha("ds-type"),
+        code_commit_sha="abc1234",
+        description=None,
+    )
+    version_before = run.version
+    events_before = len(list_events(db, run.id))
+
+    with pytest.raises(DomainError) as exc:
+        attach_artifact(
+            db,
+            run_id=run.id,
+            actor="researcher",
+            name="evil.bin",
+            artifact_type="image",
+            uri="file:///tmp/evil.bin",
+            content_sha256=sha("evil"),
+            media_type=None,
+            expected_version=version_before,
+        )
+    assert exc.value.status_code == 422
+    assert "产物类型非法" in exc.value.message
+    # 非法类型不得产生事件或改动投影版本
+    db.rollback()
+    stored = db.get(RunProjection, run.id)
+    assert stored.version == version_before
+    assert len(list_events(db, run.id)) == events_before
+    assert all(a.get("name") != "evil.bin" for a in stored.artifacts_json)
+
+
+def test_all_allowed_artifact_types_accepted(db):
+    run = start_run(
+        db,
+        actor="researcher",
+        project="p1",
+        name="n1",
+        dataset_content_sha256=sha("ds-all"),
+        code_commit_sha="abc1234",
+        description=None,
+    )
+    for i, t in enumerate(["model", "dataset", "log", "graph"]):
+        run = attach_artifact(
+            db,
+            run_id=run.id,
+            actor="researcher",
+            name=f"a-{t}",
+            artifact_type=t,
+            uri=f"file:///tmp/{t}",
+            content_sha256=sha(t),
+            media_type=None,
+            expected_version=run.version,
+        )
+        assert run.artifacts_json[i]["type"] == t
+    assert {a["type"] for a in run.artifacts_json} == set(ARTIFACT_TYPE_LABELS)
+
+
+def test_schema_rejects_illegal_artifact_type():
+    from pydantic import ValidationError
+
+    from app.schemas import AttachArtifactCommand
+
+    base = dict(
+        name="x",
+        uri="file:///x",
+        content_sha256=sha("x"),
+        media_type=None,
+        expected_version=1,
+    )
+    # 合法类型通过（Pydantic 归一化为枚举值字符串）
+    cmd = AttachArtifactCommand(artifact_type="log", **base)
+    assert cmd.artifact_type.value == "log"
+
+    with pytest.raises(ValidationError) as exc:
+        AttachArtifactCommand(artifact_type="video", **base)
+    assert "产物类型非法" in str(exc.value)
+
+    with pytest.raises(ValidationError):
+        AttachArtifactCommand(artifact_type=None, **base)
 
 
 def test_cannot_command_before_start(db):
