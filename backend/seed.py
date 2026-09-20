@@ -75,6 +75,7 @@ def seed() -> None:
             name="structure.pdb",
             uri="s3://lab-artifacts/protein-folding/run1/structure.pdb",
             content_sha256=sha256_hex("structure-pdb-run1"),
+            artifact_type="model",
             media_type="chemical/x-pdb",
             expected_version=run1.version,
         )
@@ -113,6 +114,7 @@ def seed() -> None:
             name="hits.csv",
             uri="s3://lab-artifacts/drug-screen/run42/hits.csv",
             content_sha256=sha256_hex("hits-csv-run42"),
+            artifact_type="dataset",
             media_type="text/csv",
             expected_version=run2.version,
         )

@@ -43,6 +43,14 @@
         <ul v-if="lineage.artifacts?.length">
           <li v-for="(a, i) in lineage.artifacts" :key="i">
             <strong>{{ a.name }}</strong>
+            <n-tag
+              size="small"
+              :bordered="false"
+              :type="tagType(a.artifact_type)"
+              style="margin-left: 8px"
+            >
+              {{ typeLabel(a.artifact_type) }}
+            </n-tag>
             <div class="mono muted" style="font-size: 12px">{{ a.content_sha256 }}</div>
             <div class="muted" style="font-size: 12px">{{ a.uri }}</div>
           </li>
@@ -86,12 +94,21 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { getLineage } from '../api/client'
+import { ARTIFACT_TYPE_TAG_TYPES, artifactTypeLabel } from '../constants'
 
 const route = useRoute()
 const message = useMessage()
 const lineage = ref(null)
 const id = computed(() => route.params.id)
 const colors = ['#0f766e', '#b45309', '#1d4ed8', '#be123c']
+
+function typeLabel(value) {
+  return artifactTypeLabel(value)
+}
+
+function tagType(value) {
+  return ARTIFACT_TYPE_TAG_TYPES[value] || 'default'
+}
 
 function formatTime(v) {
   return new Date(v).toLocaleString()

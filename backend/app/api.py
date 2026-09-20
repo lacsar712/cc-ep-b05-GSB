@@ -139,6 +139,7 @@ def post_artifact(
             name=body.name,
             uri=body.uri,
             content_sha256=body.content_sha256,
+            artifact_type=body.artifact_type,
             media_type=body.media_type,
             expected_version=body.expected_version,
         )

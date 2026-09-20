@@ -176,6 +176,7 @@ def test_projection_matches_event_replay(db):
         name="model.bin",
         uri="file:///tmp/model.bin",
         content_sha256=sha("model"),
+        artifact_type="model",
         media_type="application/octet-stream",
         expected_version=run.version,
     )
@@ -204,6 +205,7 @@ def test_projection_matches_event_replay(db):
     assert rebuilt.code_commit_sha == stored.code_commit_sha
     assert len(rebuilt.metrics_json) == len(stored.metrics_json)
     assert len(rebuilt.artifacts_json) == len(stored.artifacts_json)
+    assert rebuilt.artifacts_json[0]["artifact_type"] == "model"
 
 
 def test_cannot_command_before_start(db):
@@ -218,3 +220,61 @@ def test_cannot_command_before_start(db):
             step=0,
             expected_version=0,
         )
+
+
+def test_attach_artifact_illegal_type_rejected(db):
+    run = start_run(
+        db,
+        actor="researcher",
+        project="p1",
+        name="n1",
+        dataset_content_sha256=sha("ds-illegal-type"),
+        code_commit_sha="abc1234",
+        description=None,
+    )
+    # 领域层必须拦截枚举之外的类型，并在原因中说明合法取值。
+    with pytest.raises(DomainError) as exc_info:
+        attach_artifact(
+            db,
+            run_id=run.id,
+            actor="researcher",
+            name="evil.bin",
+            uri="file:///tmp/evil.bin",
+            content_sha256=sha("evil"),
+            artifact_type="payload",
+            media_type=None,
+            expected_version=run.version,
+        )
+    message = str(exc_info.value)
+    assert "非法产物类型" in message
+    assert "model" in message and "dataset" in message and "log" in message and "graph" in message
+
+    # 非法挂载不得产生事件，run 版本保持不变。
+    stored = db.get(RunProjection, run.id)
+    assert stored.version == 1
+    assert stored.artifacts_json == []
+
+
+def test_attach_artifact_log_type_persisted(db):
+    run = start_run(
+        db,
+        actor="researcher",
+        project="p1",
+        name="n1",
+        dataset_content_sha256=sha("ds-log-type"),
+        code_commit_sha="abc1234",
+        description=None,
+    )
+    run = attach_artifact(
+        db,
+        run_id=run.id,
+        actor="researcher",
+        name="train.log",
+        uri="s3://lab-artifacts/train.log",
+        content_sha256=sha("log"),
+        artifact_type="log",
+        media_type="text/plain",
+        expected_version=run.version,
+    )
+    assert run.version == 2
+    assert run.artifacts_json[0]["artifact_type"] == "log"

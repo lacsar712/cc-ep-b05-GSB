@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import EventStore, RunProjection
+from app.schemas import ArtifactType
 
 
 TERMINAL_STATUSES = {"completed", "aborted"}
@@ -103,6 +104,7 @@ def _apply_event_to_projection(proj: RunProjection | None, event: EventStore) ->
                 "name": payload["name"],
                 "uri": payload["uri"],
                 "content_sha256": payload["content_sha256"].lower(),
+                "artifact_type": payload["artifact_type"],
                 "media_type": payload.get("media_type"),
                 "attached_at": event.occurred_at.isoformat(),
                 "actor": event.actor,
@@ -222,12 +224,21 @@ def attach_artifact(
     name: str,
     uri: str,
     content_sha256: str,
+    artifact_type: ArtifactType,
     media_type: str | None,
     expected_version: int,
 ) -> RunProjection:
     proj = _get_projection(db, run_id)
     _require_running(proj)
     _check_expected_version(proj, expected_version)
+
+    # 领域层第二道防线：即便绕过 schema（如事件回放/内部调用）也只接受枚举值。
+    allowed = {t.value for t in ArtifactType}
+    raw_type = artifact_type.value if isinstance(artifact_type, ArtifactType) else artifact_type
+    if raw_type not in allowed:
+        raise DomainError(
+            f"非法产物类型: {raw_type!r}；只允许 {sorted(allowed)}（模型/数据集/日志/图）"
+        )
 
     event = _append_event(
         db,
@@ -238,6 +249,7 @@ def attach_artifact(
             "name": name,
             "uri": uri,
             "content_sha256": content_sha256.lower(),
+            "artifact_type": raw_type,
             "media_type": media_type,
         },
         actor=actor,

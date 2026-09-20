@@ -1,8 +1,26 @@
 from datetime import datetime
+from enum import Enum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+class ArtifactType(str, Enum):
+    """挂载产物的合法类型：模型 / 数据集 / 日志 / 图。"""
+
+    model = "model"
+    dataset = "dataset"
+    log = "log"
+    graph = "graph"
+
+
+ARTIFACT_TYPE_LABELS = {
+    ArtifactType.model: "模型",
+    ArtifactType.dataset: "数据集",
+    ArtifactType.log: "日志",
+    ArtifactType.graph: "图",
+}
 
 
 class StartRunCommand(BaseModel):
@@ -25,8 +43,20 @@ class AttachArtifactCommand(BaseModel):
     name: str = Field(min_length=1, max_length=256)
     uri: str = Field(min_length=1, max_length=1024)
     content_sha256: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$")
+    artifact_type: ArtifactType = Field(description="产物类型：model / dataset / log / graph")
     media_type: str | None = Field(default=None, max_length=128)
     expected_version: int = Field(ge=1)
+
+    @field_validator("artifact_type", mode="before")
+    @classmethod
+    def _validate_artifact_type(cls, value: Any) -> Any:
+        # 页面选择框只允许枚举值；对绕过页面直接提交的其它值，在入口处给出明确原因。
+        allowed = [t.value for t in ArtifactType]
+        if not isinstance(value, str) or value not in allowed:
+            raise ValueError(
+                f"非法产物类型: {value!r}；只允许 {allowed}（模型/数据集/日志/图）"
+            )
+        return value
 
 
 class CompleteRunCommand(BaseModel):

@@ -76,6 +76,16 @@
           <n-input v-model:value="artifact.uri" placeholder="URI" style="margin-bottom: 8px" />
           <n-input v-model:value="artifact.content_sha256" placeholder="content sha256" class="mono" style="margin-bottom: 8px" />
           <n-button text type="primary" @click="artifact.content_sha256 = randomHex(32)">随机指纹</n-button>
+          <n-form-item label="产物类型（枚举约束）" :show-feedback="false" style="margin-top: 8px; margin-bottom: 0">
+            <n-select
+              v-model:value="artifact.artifact_type"
+              filterable
+              tag
+              :options="artifactTypeOptions"
+              :on-create="handleCreateType"
+              placeholder="模型 / 数据集 / 日志 / 图"
+            />
+          </n-form-item>
           <div style="margin-top: 8px">
             <n-button type="primary" :loading="busy" @click="doArtifact">挂载产物</n-button>
           </div>
@@ -97,9 +107,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { useMessage } from 'naive-ui'
+import { NTag, useMessage } from 'naive-ui'
 import {
   abortRun,
   attachArtifact,
@@ -108,6 +118,13 @@ import {
   recordMetric,
 } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import {
+  ARTIFACT_TYPE_OPTIONS,
+  ARTIFACT_TYPE_LABELS,
+  ARTIFACT_TYPE_TAG_TYPES,
+  illegalArtifactTypeReason,
+  isArtifactType,
+} from '../constants'
 
 const route = useRoute()
 const auth = useAuthStore()
@@ -119,11 +136,20 @@ const abortReason = ref('')
 
 const metric = reactive({ name: 'loss', value: 0.5, step: 1 })
 const artifact = reactive({
-  name: 'checkpoint.pt',
-  uri: 's3://lab-artifacts/checkpoint.pt',
+  name: 'train.log',
+  uri: 's3://lab-artifacts/train.log',
   content_sha256: '',
-  media_type: 'application/octet-stream',
+  artifact_type: 'log',
+  media_type: 'text/plain',
 })
+
+// 选择框提供 模型/数据集/日志/图；允许输入并选中其它值，提交时在页面侧拦截。
+const artifactTypeOptions = ref([...ARTIFACT_TYPE_OPTIONS])
+function handleCreateType(value) {
+  const option = { label: `${value}（非枚举，提交将被拒）`, value }
+  artifactTypeOptions.value = [...artifactTypeOptions.value, option]
+  return option
+}
 
 const canWrite = computed(() => auth.role === 'researcher' && run.value?.status === 'running')
 const statusLabel = computed(() => {
@@ -142,6 +168,20 @@ const metricCols = [
 ]
 const artifactCols = [
   { title: 'name', key: 'name' },
+  {
+    title: '类型',
+    key: 'artifact_type',
+    width: 100,
+    render(row) {
+      const type = row.artifact_type
+      const label = ARTIFACT_TYPE_LABELS[type] || type || '—'
+      return h(
+        NTag,
+        { size: 'small', type: ARTIFACT_TYPE_TAG_TYPES[type] || 'default', bordered: false },
+        { default: () => label },
+      )
+    },
+  },
   { title: 'uri', key: 'uri', ellipsis: { tooltip: true } },
 ]
 
@@ -189,9 +229,18 @@ function doArtifact() {
     message.warning('请填写 64 位 content_sha256')
     return
   }
+  // 页面侧拦截枚举之外的类型，并给出原因；即便绕过页面，服务端还会再拒一次。
+  if (!isArtifactType(artifact.artifact_type)) {
+    message.error(illegalArtifactTypeReason(artifact.artifact_type))
+    return
+  }
   return withBusy(() =>
     attachArtifact(run.value.id, {
-      ...artifact,
+      name: artifact.name,
+      uri: artifact.uri,
+      content_sha256: artifact.content_sha256,
+      artifact_type: artifact.artifact_type,
+      media_type: artifact.media_type,
       expected_version: run.value.version,
     }),
   )
